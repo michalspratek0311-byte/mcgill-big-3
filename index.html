@@ -721,7 +721,8 @@
      * McGill Big 3 – Kompenzační časovač, průvodce cvičením & týdenní evidence
      * Vše v jednom souboru: protokol McGill Big 3 s vylepšenou logikou Curl-Up,
      * týdenní kalendář Po–Ne + 4týdenní historie (localStorage), timestamp-based
-     * časovač, Web Audio API syntéza, Web Speech API (cs-CZ), Vibrace, Wake Lock.
+     * časovač, Web Audio API syntéza, Web Speech API (cs-CZ), Vibrace, Wake Lock,
+     * + synchronizace do Master Sheetu (Training OS API v2.0).
      * ============================================================================
      */
 
@@ -734,6 +735,53 @@
 
       const SETTINGS_STORAGE_KEY = 'mcgill_big3_settings_v2';
       const HISTORY_STORAGE_KEY = 'mcgill_big3_history_v2';
+
+      // === PROPOJENÍ S MASTER SHEETEM (Training OS API v2.0) ===
+      const TOS_API_URL = 'https://script.google.com/macros/s/AKfycbyyKecUhMJQJdqEDZ2nvwDCC5ddp4NGM4z1fPRA2zqRQsD14f1Qvzcb11SiR8lql132MA/exec';
+      const TOS_API_TOKEN = '1974';
+      const TOS_QUEUE_KEY = 'mcgill_tos_sync_queue';
+
+      function syncBig3ToMasterSheet(dateKey, detailText, durationText) {
+        const payload = {
+          action: 'log_activity',
+          id: 'big3_' + dateKey, // Deterministické ID: max 1 záznam na den v Log_Aktivity
+          date: dateKey,
+          type: 'big3',
+          phase: 'Big 3',
+          detail: detailText || 'McGill Big 3',
+          value: durationText || 'hotovo'
+        };
+
+        let queue = [];
+        try { queue = JSON.parse(localStorage.getItem(TOS_QUEUE_KEY) || '[]'); } catch (e) {}
+        if (!queue.some((q) => q.id === payload.id)) {
+          queue.push(payload);
+          try { localStorage.setItem(TOS_QUEUE_KEY, JSON.stringify(queue)); } catch (e) {}
+        }
+        flushBig3SyncQueue();
+      }
+
+      async function flushBig3SyncQueue() {
+        if (!navigator.onLine) return;
+        let queue = [];
+        try { queue = JSON.parse(localStorage.getItem(TOS_QUEUE_KEY) || '[]'); } catch (e) {}
+        if (!queue.length) return;
+
+        try {
+          const res = await fetch(TOS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ token: TOS_API_TOKEN, items: queue })
+          });
+          const json = await res.json();
+          if (json.status === 'ok') {
+            localStorage.setItem(TOS_QUEUE_KEY, '[]');
+          }
+        } catch (e) {
+          // Zůstane ve frontě a odešle se při příštím spuštění online
+        }
+      }
+
       const RING_RADIUS = 114;
       const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS; // ~716.283
       const DAY_NAMES_SHORT = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
@@ -1610,6 +1658,9 @@
         if (!els.historyModal.classList.contains('hidden')) {
           renderHistoryModal();
         }
+        const detail = `McGill Big 3 (${getActivePyramidString()}, ${settings.holdSec}s)`;
+        const dur = formatMMSS(getTotalWorkoutSeconds(steps));
+        syncBig3ToMasterSheet(todayKey, detail, dur);
       }
 
       function toggleDateCompleted(dateKey, dayLabelForToast = null) {
@@ -1620,6 +1671,7 @@
         } else {
           completedDates.add(dateKey);
           showToast(dayLabelForToast ? `${dayLabelForToast}: odcvičeno ✓` : 'Den označen jako odcvičený ✓');
+          syncBig3ToMasterSheet(dateKey, 'McGill Big 3 (ruční označení)', 'hotovo');
         }
         saveHistoryToStorage();
         renderWeeklyTracker();
@@ -2724,6 +2776,8 @@
         bindEvents();
         renderWeeklyTracker();
         rebuildWorkout(true);
+        flushBig3SyncQueue();
+        window.addEventListener('online', flushBig3SyncQueue);
       }
 
       window.addEventListener('DOMContentLoaded', initApp);

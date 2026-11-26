@@ -760,7 +760,22 @@
         }
         flushBig3SyncQueue();
       }
+function deleteBig3FromMasterSheet(dateKey) {
+        const targetId = 'big3_' + dateKey;
+        const payload = {
+          action: 'delete_activity',
+          id: targetId,
+          date: dateKey
+        };
 
+        let queue = [];
+        try { queue = JSON.parse(localStorage.getItem(TOS_QUEUE_KEY) || '[]'); } catch (e) {}
+        // Vyhodit případný čekající zápis pro stejný den a přidat požadavek na smazání
+        queue = queue.filter((q) => q.id !== targetId);
+        queue.push(payload);
+        try { localStorage.setItem(TOS_QUEUE_KEY, JSON.stringify(queue)); } catch (e) {}
+        flushBig3SyncQueue();
+      }
       async function flushBig3SyncQueue() {
         if (!navigator.onLine) return;
         let queue = [];
@@ -1668,6 +1683,7 @@
         if (completedDates.has(dateKey)) {
           completedDates.delete(dateKey);
           showToast(dayLabelForToast ? `${dayLabelForToast}: odznačeno` : 'Den odznačen');
+          deleteBig3FromMasterSheet(dateKey);
         } else {
           completedDates.add(dateKey);
           showToast(dayLabelForToast ? `${dayLabelForToast}: odcvičeno ✓` : 'Den označen jako odcvičený ✓');
